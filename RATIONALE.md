@@ -1,30 +1,49 @@
-# Project 2 rationale: base image and service choices
+# Project 2 Rationale: Base Image and Service Choices
 
-## Multi-stage image choice
+## Multi-stage Image Choice
 
-I used `node:24` as a build stage because the `npm ci` and `npm run build` steps need Node.js and npm. The final image uses `nginx:alpine` because the output is a static HTML file, and nginx can serve it without Node.js, npm, source code, or build tools. The `COPY --from=build` instruction transfers only the generated `build/` directory into the runtime stage. Docker's official documentation explains that separate stages allow selecting just the artifacts needed in the final image [1]. Alpine-based nginx keeps the runtime focused on serving static assets instead of packaging the full Node toolchain. This is a packaging benefit, not a claim that all Alpine images are always more secure.
+For this project, I used `node:24` in the build stage because Node.js and npm are needed to install dependencies and run the build script. For the final stage, I chose `nginx:alpine` because the application produces a static HTML page. nginx can serve that page without needing the complete Node.js development environment.
 
-**My measured comparison** (complete after running the comparison commands; use your own `docker images demo` results, not the instructor's example):
+I built both a single-stage image and a multi-stage image on my Ubuntu system using Docker. My measured results were:
 
-| Image | Size measured locally |
-|---|---|
-| `demo:single` (`Dockerfile.single`, Node + `http-server`) | **TO FILL: ____ MB or GB** |
-| `demo:multi` (`Dockerfile`, nginx:alpine final stage) | **TO FILL: ____ MB or GB** |
+| Image | Disk Usage | Content Size |
+|---|---:|---:|
+| Single-stage (`demo:single`) | 1.65 GB | 413 MB |
+| Multi-stage (`demo:multi`) | 93.6 MB | 26.3 MB |
 
-My measured size reduction is **TO FILL: ____ % (or ____× smaller)**. The difference comes from excluding the Node build environment and its dependencies from the image that runs in production. Record the `docker images demo` screenshot as supporting evidence; exact results vary with image releases and platform.
+The multi-stage image was approximately **94.3% smaller**, or **17.6 times smaller**, based on the reported disk usage. This is a major improvement because the final image only contains nginx and the application files instead of the entire Node.js build environment.
 
-## Why Redis is a separate service
+Docker's multi-stage build documentation explains that build artifacts can be copied between stages without including all the build tools in the final image [1]. This makes the image smaller and avoids shipping unnecessary development dependencies.
 
-I used two Compose services: `web` (my built image) and `cache` (`redis:7-alpine`, a public ready-made service). Redis is its own service so its lifecycle, configuration, and health can be managed independently of the web image. This avoids baking a second server process into the nginx container. The Compose health check uses `redis-cli ping`, while `depends_on` with `condition: service_healthy` waits for the cache's health check to succeed before starting the web service. Docker documents this specific startup behavior [2].
+## Why Redis Is a Separate Service
 
-The example HTML page does not actually read or write Redis, so the cache is a **demonstration dependency**, not a required runtime data path. As the Week 6 stop-cache test shows, the web page remains available when Redis stops. In the course's service-model framing, containers occupy a middle ground between managing an entire VM (IaaS) and surrendering most runtime control to a managed application platform (PaaS). Here I choose the nginx-based runtime and Compose wiring while accepting Redis as a prebuilt dependency instead of implementing a cache myself.
+I used two services in `compose.yaml`: `web`, which serves the static page through nginx, and `cache`, which uses the official `redis:7-alpine` image.
 
-The local function illustrates a separate execution model: AWS SAM CLI can invoke a handler locally using Docker rather than keeping an HTTP server running [3]. It is part of this repository but excluded from the nginx build context by `.dockerignore`.
+Redis is kept separate because it is a different service with its own purpose and lifecycle. Instead of installing Redis inside the web container, Docker Compose allows me to use an existing Redis image and manage it independently.
 
-## Sources
+I configured a Redis health check using `redis-cli ping` and `depends_on` with `condition: service_healthy`. This ensures Redis becomes healthy before the web container starts [2].
 
-[1] Docker Docs, “Multi-stage builds.” https://docs.docker.com/build/building/multi-stage/
+During testing, Redis returned `PONG`, and the web service returned HTTP `200`. I also confirmed that both containers were running successfully.
 
-[2] Docker Docs, “Control startup and shutdown order in Compose.” https://docs.docker.com/compose/how-tos/startup-order/
+The demo web page does not directly communicate with Redis, so this setup demonstrates service composition and startup dependencies rather than a fully integrated caching application.
 
-[3] AWS Docs, “AWS SAM CLI installation.” https://docs.aws.amazon.com/serverless-applicationmodel/latest/developerguide/install-sam-cli.html
+This relates to the course's discussion of IaaS and PaaS. Containers provide control over application packaging, service configuration, and dependencies without requiring a separate virtual machine for each component.
+
+## References
+
+[1] Docker Docs. *Multi-stage builds.* https://docs.docker.com/build/building/multi-stage/
+
+[2] Docker Docs. *Control startup and shutdown order in Compose.* https://docs.docker.com/compose/how-tos/startup-order/
+
+[3] Docker Docs. *Docker Compose configuration reference.* https://docs.docker.com/reference/cli/docker/compose/config/
+
+
+
+
+
+
+
+
+
+
+
